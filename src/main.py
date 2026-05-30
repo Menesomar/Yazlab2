@@ -3,101 +3,91 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 import json
+import torch
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 
-# Yazdığımız modülleri içe aktarıyoruz
 from data_loader import load_config, load_and_preprocess_batadal
 from automata import build_automata
 from explainability import generate_explanation
+from pipeline import train_deep_learning_model, create_sequences
 
 def set_seed(seed):
-    """Deneylerin tekrarlanabilirliği için seed ayarlar."""
     np.random.seed(seed)
-    # Eğer PyTorch kullanılacaksa buraya torch.manual_seed(seed) eklenebilir
+    torch.manual_seed(seed)
 
-def add_gaussian_noise(data, mean=0.0, std=0.1):
-    """Veriye Gaussian gürültüsü ekler."""
-    noise = np.random.normal(mean, std, size=data.shape)
-    return data + noise
+def evaluate_predictions(y_true, y_pred, model_name):
+    """Metrikleri hesaplar ve ekrana basar."""
+    acc = accuracy_score(y_true, y_pred)
+    prec = precision_score(y_true, y_pred, zero_division=0)
+    rec = recall_score(y_true, y_pred, zero_division=0)
+    f1 = f1_score(y_true, y_pred, zero_division=0)
+    print(f"[{model_name}] Accuracy: {acc:.4f} | Precision: {prec:.4f} | Recall: {rec:.4f} | F1-Score: {f1:.4f}")
+    return acc, prec, rec, f1
 
-def plot_transition_heatmap(probability_matrix, save_path):
-    """Geçiş olasılıklarını Heatmap olarak çizer ve kaydeder."""
-    states = list(probability_matrix.keys())
-    if not states:
-        return
-        
-    # Matrisi 2D Numpy dizisine çevirme
-    matrix_size = len(states)
-    grid = np.zeros((matrix_size, matrix_size))
-    
-    state_to_idx = {state: idx for idx, state in enumerate(states)}
-    
-    for current_state, transitions in probability_matrix.items():
-        for next_state, prob in transitions.items():
-            if next_state in state_to_idx:
-                grid[state_to_idx[current_state], state_to_idx[next_state]] = prob
-                
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(grid, xticklabels=states, yticklabels=states, annot=False, cmap='YlGnBu')
-    plt.title('Automata Transition Probability Heatmap')
-    plt.xlabel('Next State')
-    plt.ylabel('Current State')
+def plot_conf_matrix(y_true, y_pred, title, save_path):
+    """Confusion Matrix çizer ve kaydeder."""
+    cm = confusion_matrix(y_true, y_pred)
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+    plt.title(title)
+    plt.ylabel('Gerçek Değer')
+    plt.xlabel('Tahmin')
     plt.tight_layout()
     plt.savefig(save_path)
     plt.close()
-    print(f"Heatmap kaydedildi: {save_path}")
 
-def run_experiments():
+def run_full_experiments():
     config = load_config()
-    seeds = config['experiment']['random_seeds'] # [42, 123, 2026, 7, 999] 
+    seeds = config['experiment']['random_seeds']
     
-    print("Veriler yükleniyor...")
-    batadal_data = load_and_preprocess_batadal()
-    X_train_pca, y_train, X_val_pca, y_val, X_test_pca, y_test = batadal_data["automata"]
-    
-    # Grafikler için klasör oluşturma
     base_dir = Path(__file__).resolve().parent.parent
     plots_dir = base_dir / "plots"
     plots_dir.mkdir(exist_ok=True)
     
+    batadal_data = load_and_preprocess_batadal()
+    X_train_dl, y_train_dl, X_val_dl, y_val_dl, X_test_dl, y_test_dl = batadal_data["deep_learning"]
+    X_train_pca, y_train_pca, X_val_pca, y_val_pca, X_test_pca, y_test_pca = batadal_data["automata"]
+
+    time_steps = 10
+    X_t_seq, y_t_seq = create_sequences(X_train_dl, y_train_dl, time_steps)
+    X_v_seq, y_v_seq = create_sequences(X_val_dl, y_val_dl, time_steps)
+    X_test_seq, y_test_seq = create_sequences(X_test_dl, y_test_dl, time_steps)
+    input_size = X_t_seq.shape[2]
+
+    # --- 1. DERİN ÖĞRENME DENEYLERİ ---
+    print("\n--- DERİN ÖĞRENME (BLACK-BOX) TESTLERİ ---")
     for seed in seeds:
-        print(f"\n{'='*40}")
-        print(f"DENEY BAŞLIYOR - RANDOM SEED: {seed}")
-        print(f"{'='*40}")
+        print(f"\nSeed: {seed}")
         set_seed(seed)
         
-        # 1. Orijinal Veri ile Otomata İnşası [cite: 88]
-        print("\n[Senaryo 1: Orijinal Veri]")
-        prob_matrix, known_patterns = build_automata(
-            X_train_pca, 
-            window_size=config['model_params']['automata']['window_size'], 
-            alphabet_size=config['model_params']['automata']['alphabet_size']
-        )
-        
-        # Sadece ilk seed için Heatmap çizdir (kalabalık olmaması için)
-        if seed == 42:
-            plot_transition_heatmap(prob_matrix, plots_dir / "transition_heatmap_seed42.png")
-            
-        # 2. Gürültülü Veri Senaryosu 
-        print("\n[Senaryo 2: Gürültülü Veri]")
-        X_train_noisy = add_gaussian_noise(X_train_pca)
-        noisy_prob_matrix, _ = build_automata(
-            X_train_noisy,
-            window_size=config['model_params']['automata']['window_size'],
-            alphabet_size=config['model_params']['automata']['alphabet_size']
-        )
-        
-        # 3. Açıklanabilirlik ve Unseen Testi
-        print("\n[Açıklanabilirlik Modülü Testi]")
-        # Test setinden rastgele bir örüntü alarak simülasyon yapıyoruz
-        sample_pattern = "abc" 
-        explanation = generate_explanation(
-            time_step=1,
-            current_state=known_patterns[0] if known_patterns else "aaa",
-            incoming_pattern=sample_pattern,
-            probability_matrix=prob_matrix,
-            known_patterns=known_patterns
-        )
-        print(json.dumps(explanation, indent=4))
+        # LSTM
+        lstm_model = train_deep_learning_model("LSTM", X_t_seq, y_t_seq, X_v_seq, y_v_seq, input_size)
+        lstm_model.eval()
+        with torch.no_grad():
+            preds_lstm = lstm_model(torch.FloatTensor(X_test_seq).to(next(lstm_model.parameters()).device))
+            preds_lstm_cls = (preds_lstm.cpu().numpy() > 0.5).astype(int).flatten()
+        evaluate_predictions(y_test_seq, preds_lstm_cls, f"LSTM (Seed {seed})")
+        if seed == 42: plot_conf_matrix(y_test_seq, preds_lstm_cls, "LSTM Confusion Matrix", plots_dir / "lstm_cm.png")
+
+        # GRU
+        gru_model = train_deep_learning_model("GRU", X_t_seq, y_t_seq, X_v_seq, y_v_seq, input_size)
+        gru_model.eval()
+        with torch.no_grad():
+            preds_gru = gru_model(torch.FloatTensor(X_test_seq).to(next(gru_model.parameters()).device))
+            preds_gru_cls = (preds_gru.cpu().numpy() > 0.5).astype(int).flatten()
+        evaluate_predictions(y_test_seq, preds_gru_cls, f"GRU (Seed {seed})")
+        if seed == 42: plot_conf_matrix(y_test_seq, preds_gru_cls, "GRU Confusion Matrix", plots_dir / "gru_cm.png")
+
+    # --- 2. OTOMATA PARAMETRE ANALİZİ ---
+    print("\n--- OTOMATA (WHITE-BOX) PARAMETRE ANALİZİ ---")
+    windows = [3, 4, 5, 6]
+    alphabets = [3, 4, 5, 6]
+    
+    for w in windows:
+        for a in alphabets:
+            print(f"\nOtomata Eğitiliyor -> Window Size: {w}, Alphabet Size: {a}")
+            matrix, _ = build_automata(X_train_pca, window_size=w, alphabet_size=a)
+            print(f"Toplam State Sayısı: {len(matrix)}")
 
 import sys
 import logging
@@ -106,6 +96,7 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 if __name__ == "__main__":
+<<<<<<< HEAD
     try:
         logging.info("Proje baslatiliyor... Veri setleri yukleniyor ve deneyler kosuluyor.")
         run_full_experiments()
@@ -119,3 +110,6 @@ if __name__ == "__main__":
         logging.error(f"Sistemde beklenmeyen kritik bir hata olustu. Program guvenli sekilde durduruluyor. Detay: {e}")
         sys.exit(1)
     print("\nTüm deneyler başarıyla tamamlandı. Grafikler 'plots' klasörüne kaydedildi.")
+=======
+    run_full_experiments()
+>>>>>>> 0b35961 (lokal degisiklikler guvenceye alindi)
