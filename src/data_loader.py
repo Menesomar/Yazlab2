@@ -51,7 +51,11 @@ def load_and_preprocess_skab():
     features = [col for col in full_df.columns if col not in drop_cols and col in full_df.columns]
     
     X = full_df[features]
-    y = full_df['anomaly']
+    
+    # --- YENİ EKLENEN TEMİZLİK: Hedef değişkeni kesin olarak 0.0 ve 1.0 yap ---
+    y_raw = full_df['anomaly']
+    y = pd.Series(np.where(y_raw > 0, 1.0, 0.0), index=y_raw.index)
+    
     groups = full_df['source_file']
     return X, y, groups
 
@@ -79,7 +83,10 @@ def load_and_preprocess_batadal():
     target_col = label_cols[0] if label_cols else df.columns[-1]
     
     X = df.drop(columns=time_cols + [target_col])
-    y = df[target_col]
+    
+    # --- YENİ EKLENEN TEMİZLİK: BATADAL'daki -999 gibi değerleri 0.0 yap ---
+    y_raw = df[target_col]
+    y = pd.Series(np.where(y_raw > 0, 1.0, 0.0), index=y_raw.index)
     
     # %60 Eğitim, %20 Doğrulama, %20 Test (Zaman sırasını bozmadan)
     n = len(df)
