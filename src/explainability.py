@@ -1,7 +1,8 @@
 import json
 import numpy as np
+from typing import Dict, List, Tuple, Union
 
-def levenshtein_distance(s1, s2):
+def levenshtein_distance(s1: str, s2: str) -> int:
     """İki sembolik dizi (pattern) arasındaki düzenleme mesafesini hesaplar."""
     if len(s1) < len(s2):
         return levenshtein_distance(s2, s1)
@@ -18,14 +19,34 @@ def levenshtein_distance(s1, s2):
         previous_row = current_row
     return previous_row[-1]
 
-def handle_unseen_pattern(incoming_pattern, known_patterns):
+def handle_unseen_pattern(incoming_pattern: str, known_patterns: List[str]) -> Tuple[str, int]:
     """Unseen durumunda Levenshtein ile en yakın pattern'ı bulur."""
     distances = [levenshtein_distance(incoming_pattern, kp) for kp in known_patterns]
-    min_index = np.argmin(distances)
+    min_index = int(np.argmin(distances))
     return known_patterns[min_index], distances[min_index]
 
-def generate_explanation(time_step, current_state, incoming_pattern, probability_matrix, known_patterns, threshold=0.15):
-    """Karar sürecini JSON formatında raporlar ve güven skoru üretir."""
+def generate_explanation(
+    time_step: int, 
+    current_state: str, 
+    incoming_pattern: str, 
+    probability_matrix: Dict[str, Dict[str, float]], 
+    known_patterns: List[str], 
+    threshold: float = 0.15
+) -> Dict[str, Union[int, str, float]]:
+    """
+    Olasılıksal otomata modelinin kararlarını deterministik olarak açıklar.
+
+    Args:
+        time_step (int): Zaman serisindeki mevcut adım.
+        current_state (str): Otomatanın içinde bulunduğu aktif durum.
+        incoming_pattern (str): SAX/PAA dönüşümünden gelen yeni örüntü.
+        probability_matrix (Dict[str, Dict[str, float]]): Durumlar arası geçiş frekansları.
+        known_patterns (List[str]): Eğitim setinde görülen benzersiz örüntüler sözlüğü.
+        threshold (float): Anomali kararı için sınır olasılık değeri (varsayılan: 0.15).
+
+    Returns:
+        Dict[str, Union[int, str, float]]: Karar mekanizmasını özetleyen JSON uyumlu sözlük.
+    """
     status = "seen"
     mapped_to = incoming_pattern
     
@@ -51,7 +72,7 @@ def generate_explanation(time_step, current_state, incoming_pattern, probability
     }
     return explanation
 
-def run_unit_tests():
+def run_unit_tests() -> None:
     """Yönergede zorunlu tutulan Unseen yönetimi birim testleri."""
     print("Birim Testler (Unit Tests) Çalıştırılıyor...")
     
