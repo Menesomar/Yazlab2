@@ -99,6 +99,23 @@ def run_experiments():
         )
         print(json.dumps(explanation, indent=4))
 
+import sys
+import logging
+
+# Profesyonel loglama ayarları
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 if __name__ == "__main__":
-    run_experiments()
+    try:
+        logging.info("Proje baslatiliyor... Veri setleri yukleniyor ve deneyler kosuluyor.")
+        run_full_experiments()
+        logging.info("Tebrikler! Tum deneyler ve model egitimleri basariyla tamamlandi.")
+        
+    except FileNotFoundError as e:
+        logging.error(f"Kritik Hata: Veri seti veya konfigurasyon dosyasi eksik! Lutfen 'data/' klasorunu kontrol edin. Detay: {e}")
+        sys.exit(1) # Sistemi guvenli bir sekilde kapat
+        
+    except Exception as e:
+        logging.error(f"Sistemde beklenmeyen kritik bir hata olustu. Program guvenli sekilde durduruluyor. Detay: {e}")
+        sys.exit(1)
     print("\nTüm deneyler başarıyla tamamlandı. Grafikler 'plots' klasörüne kaydedildi.")
